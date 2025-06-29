@@ -3,3 +3,5 @@ beautifulsoup4
 pandas
 python-dotenv
 tabulate
+# Alternative: Use requests directly for Notion API
+# notion-client==2.2.1

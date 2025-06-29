@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import os
 from dotenv import load_dotenv
+from time import sleep
+from notion_client import Client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -23,6 +25,11 @@ session = requests.Session()
 # Log in (credentials loaded from environment variables)
 username = os.getenv("PWN_USERNAME")
 password = os.getenv("PWN_PASSWORD")
+
+# Notion API setup
+notion_token = os.getenv("NOTION_TOKEN", "your_notion_token")
+notion_page_id = os.getenv("NOTION_PAGE_ID", "your_parent_page_id")
+notion = Client(auth=notion_token)
 
 if not username or not password:
     print("Error: PWN_USERNAME and PWN_PASSWORD must be set in .env file")
@@ -214,6 +221,60 @@ markdown_table = df_processed.to_markdown(index=False)
 print("Saving to file...")
 with open("pwn_college_structure.md", "w") as f:
     f.write(markdown_table)
+    
+    
+# Create Notion database
+def create_notion_database(parent_page_id):
+    try:
+        database = notion.databases.create(
+            parent={"type": "page_id", "page_id": parent_page_id},
+            title=[{"type": "text", "text": {"content": "pwn.college Core Materials Structure"}}],
+            properties={
+                "Dojo": {"title": {}},
+                "Module": {"rich_text": {}},
+                "Progress Percentage": {"rich_text": {}},
+                "Progress Fraction": {"rich_text": {}},
+                "Users Currently Solving": {"number": {}},
+                "Challenges": {"rich_text": {}}
+            }
+        )
+        return database["id"]
+    except Exception as e:
+        print(f"Error creating Notion database: {e}")
+        exit(1)
+
+# Add data to Notion database
+def add_to_notion_database(database_id, data):
+    for row in data:
+        try:
+            # Convert users_solving to integer for number field
+            users_solving_num = int(row["Users Currently Solving"]) if row["Users Currently Solving"].isdigit() else 0
+            
+            notion.pages.create(
+                parent={"database_id": database_id},
+                properties={
+                    "Dojo": {"title": [{"text": {"content": row["Dojo"]}}]},
+                    "Module": {"rich_text": [{"text": {"content": row["Module"]}}]},
+                    "Progress Percentage": {"rich_text": [{"text": {"content": row["Progress Percentage"]}}]},
+                    "Progress Fraction": {"rich_text": [{"text": {"content": row["Progress Fraction"]}}]},
+                    "Users Currently Solving": {"number": users_solving_num},
+                    "Challenges": {"rich_text": [{"text": {"content": row["Challenges"]}}]}
+                }
+            )
+            sleep(0.3)  # Rate limit: Notion API allows ~3 requests per second
+        except Exception as e:
+            print(f"Error adding row to Notion: {row['Module']}, {e}")
+
+# Create and populate Notion database
+try:
+    database_id = create_notion_database(notion_page_id)
+    add_to_notion_database(database_id, data)
+    print(f"Scraping and Notion database creation complete. ")
+    print("Markdown backup saved to 'pwn_college_structure.md'")
+except Exception as e:
+    print(f"Error with Notion integration: {e}")
+    print("Markdown backup saved to 'pwn_college_structure.md'")
+    
 
 print(f"\n🎉 Scraping complete! Results saved to 'pwn_college_structure.md'")
 print(f"📊 Total entries: {len(df_processed)} modules across {len(df_processed['Dojo'].unique())} dojos")
