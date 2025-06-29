@@ -1,6 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Define the core dojos
 core_dojos = [
@@ -15,9 +20,13 @@ base_url = "https://pwn.college"
 login_url = f"{base_url}/login"
 session = requests.Session()
 
-# Log in (replace with actual credentials, ideally from environment variables)
-username = "your_username"
-password = "your_password"
+# Log in (credentials loaded from environment variables)
+username = os.getenv("PWN_USERNAME")
+password = os.getenv("PWN_PASSWORD")
+
+if not username or not password:
+    print("Error: PWN_USERNAME and PWN_PASSWORD must be set in .env file")
+    exit(1)
 login_data = {
     "username": username,
     "password": password
