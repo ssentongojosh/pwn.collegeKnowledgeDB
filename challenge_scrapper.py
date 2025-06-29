@@ -78,7 +78,41 @@ def get_modules(dojo_name):
         for a in soup.find_all("a", href=lambda x: x and x.startswith(f"/{dojo_name}/")):
             module_name = a.text.strip()
             module_href = a["href"].split("/")[-2]  # Extract module slug
-            modules.append((module_name, module_href))
+            
+            # Extract progress information before cleaning
+            import re
+            users_solving = "0"
+            progress_fraction = "0/0"
+            progress_percentage = "0%"
+            
+            # Look for "X Hacking Y / Z" pattern
+            hacking_match = re.search(r'(\d+)\s*hacking\s*(\d+)\s*/\s*(\d+)', module_name, re.IGNORECASE)
+            if hacking_match:
+                users_solving = hacking_match.group(1)
+                completed = hacking_match.group(2)
+                total = hacking_match.group(3)
+                progress_fraction = f"{completed}/{total}"
+            else:
+                # Look for just "Y / Z" pattern
+                fraction_match = re.search(r'(\d+)\s*/\s*(\d+)', module_name)
+                if fraction_match:
+                    completed = fraction_match.group(1)
+                    total = fraction_match.group(2)
+                    progress_fraction = f"{completed}/{total}"
+            
+            # Look for percentage pattern
+            percentage_match = re.search(r'(\d+)%', module_name)
+            if percentage_match:
+                progress_percentage = f"{percentage_match.group(1)}%"
+            
+            # Clean the module name - remove progress info
+            clean_module_name = module_name.split('\n')[0]
+            clean_module_name = re.sub(r'\d+\s*hacking.*$', '', clean_module_name, flags=re.IGNORECASE).strip()
+            clean_module_name = re.sub(r'\d+\s*/\s*\d+.*$', '', clean_module_name).strip()
+            clean_module_name = re.sub(r'\d+%.*$', '', clean_module_name).strip()
+            
+            if clean_module_name:  # Only add if we have a valid module name
+                modules.append((clean_module_name, module_href, users_solving, progress_fraction, progress_percentage))
         return modules
     except Exception as e:
         print(f"  ❌ Error accessing {dojo_url}: {e}")
@@ -120,17 +154,22 @@ for dojo_index, dojo in enumerate(core_dojos, 1):
     
     print(f"  ✓ Found {len(modules)} modules")
     
-    for module_index, (module_name, module_href) in enumerate(modules, 1):
+    for module_index, (module_name, module_href, users_solving, progress_fraction, progress_percentage) in enumerate(modules, 1):
         print(f"    [{module_index}/{len(modules)}] Module: {module_name}")
         
         challenges = get_challenges(dojo, module_href)
         if challenges:
             print(f"      ✓ Found {len(challenges)} challenges: {', '.join(challenges[:3])}" + 
                   ("..." if len(challenges) > 3 else ""))
+            print(f"      📈 Progress: {progress_percentage} ({progress_fraction}) | {users_solving} users solving")
+            
             data.append({
                 "Dojo": dojo.replace("-", " ").title(),
                 "Module": module_name,
-                "Challenges": ", ".join(challenges)
+                "Challenges": ", ".join(challenges),
+                "Users Currently Solving": users_solving,
+                "Progress Fraction": progress_fraction,
+                "Progress Percentage": progress_percentage
             })
         else:
             print(f"      ⚠️  No challenges found in {module_name}")
@@ -141,11 +180,35 @@ print(f"Scraping complete! Collected data from {len(data)} modules total.")
 # Convert to DataFrame and sort
 print("\nProcessing data...")
 df = pd.DataFrame(data)
-df = df.sort_values(by=["Dojo", "Module", "Challenges"])
+
+# Filter out progress rows and extract progress information
+print("Processing extracted data...")
+print(f"Total rows to process: {len(df)}")
+
+# Since we now extract progress info during module extraction, just process directly
+processed_data = []
+for _, row in df.iterrows():
+    module_data = {
+        "Dojo": row['Dojo'],
+        "Module": row['Module'],
+        "Challenges": row['Challenges'],
+        "Users Currently Solving": row['Users Currently Solving'],
+        "Progress Fraction": row['Progress Fraction'],
+        "Progress Percentage": row['Progress Percentage']
+    }
+    processed_data.append(module_data)
+
+# Create new DataFrame with processed data
+df_processed = pd.DataFrame(processed_data)
+df_processed = df_processed.sort_values(by=["Dojo", "Module"])
+
+# Reorder columns for better readability
+column_order = ["Dojo", "Module", "Progress Percentage", "Progress Fraction", "Users Currently Solving", "Challenges"]
+df_processed = df_processed[column_order]
 
 # Output as Markdown
 print("Generating markdown table...")
-markdown_table = df.to_markdown(index=False)
+markdown_table = df_processed.to_markdown(index=False)
 
 # Save to file
 print("Saving to file...")
@@ -153,4 +216,4 @@ with open("pwn_college_structure.md", "w") as f:
     f.write(markdown_table)
 
 print(f"\n🎉 Scraping complete! Results saved to 'pwn_college_structure.md'")
-print(f"📊 Total entries: {len(df)} modules across {len(df['Dojo'].unique())} dojos")
+print(f"📊 Total entries: {len(df_processed)} modules across {len(df_processed['Dojo'].unique())} dojos")
