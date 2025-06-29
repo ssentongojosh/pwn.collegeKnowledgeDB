@@ -27,14 +27,40 @@ password = os.getenv("PWN_PASSWORD")
 if not username or not password:
     print("Error: PWN_USERNAME and PWN_PASSWORD must be set in .env file")
     exit(1)
-login_data = {
-    "username": username,
-    "password": password
-}
+
+# First, get the login page to extract the nonce (CSRF token)
 try:
+    login_page_response = session.get(login_url)
+    if login_page_response.status_code != 200:
+        raise Exception("Failed to access login page.")
+    
+    # Parse the login page to extract the nonce
+    soup = BeautifulSoup(login_page_response.content, "html.parser")
+    nonce_input = soup.find("input", {"name": "nonce"})
+    if not nonce_input:
+        raise Exception("Could not find nonce token on login page.")
+    
+    nonce = nonce_input.get("value")
+    
+    # Prepare login data with correct field names and nonce
+    login_data = {
+        "name": username,  # Form uses 'name', not 'username'
+        "password": password,
+        "nonce": nonce,
+        "_submit": "Submit"
+    }
+    
+    # Attempt login
     response = session.post(login_url, data=login_data)
-    if response.status_code != 200:
-        raise Exception("Login failed. Check credentials or website status.")
+    
+    # Check if login was successful (pwn.college typically redirects on successful login)
+    if response.status_code == 200 and "login" in response.url.lower():
+        raise Exception("Login failed. Check credentials.")
+    elif response.status_code not in [200, 302]:
+        raise Exception(f"Login failed with status code: {response.status_code}")
+    
+    print("Login successful!")
+    
 except Exception as e:
     print(f"Error during login: {e}")
     exit(1)
@@ -45,7 +71,7 @@ def get_modules(dojo_name):
     try:
         response = session.get(dojo_url)
         if response.status_code != 200:
-            print(f"Failed to access {dojo_url}. Skipping...")
+            print(f"  ❌ Failed to access {dojo_url} (Status: {response.status_code})")
             return []
         soup = BeautifulSoup(response.content, "html.parser")
         modules = []
@@ -55,7 +81,7 @@ def get_modules(dojo_name):
             modules.append((module_name, module_href))
         return modules
     except Exception as e:
-        print(f"Error accessing {dojo_url}: {e}")
+        print(f"  ❌ Error accessing {dojo_url}: {e}")
         return []
 
 # Function to extract challenges from a module page
@@ -64,7 +90,7 @@ def get_challenges(dojo_name, module_href):
     try:
         response = session.get(module_url)
         if response.status_code != 200:
-            print(f"Failed to access {module_url}. Skipping...")
+            print(f"        ❌ Failed to access {module_url} (Status: {response.status_code})")
             return []
         soup = BeautifulSoup(response.content, "html.parser")
         challenges = []
@@ -75,31 +101,56 @@ def get_challenges(dojo_name, module_href):
                 challenges.append(challenge_name)
         return challenges
     except Exception as e:
-        print(f"Error accessing {module_url}: {e}")
+        print(f"        ❌ Error accessing {module_url}: {e}")
         return []
 
 # Collect all data
 data = []
-for dojo in core_dojos:
+print(f"\nStarting to scrape {len(core_dojos)} dojos...")
+print("=" * 50)
+
+for dojo_index, dojo in enumerate(core_dojos, 1):
+    print(f"\n[{dojo_index}/{len(core_dojos)}] Processing dojo: {dojo}")
+    print(f"URL: {base_url}/{dojo}/")
+    
     modules = get_modules(dojo)
-    for module_name, module_href in modules:
+    if not modules:
+        print(f"  ⚠️  No modules found for {dojo}")
+        continue
+    
+    print(f"  ✓ Found {len(modules)} modules")
+    
+    for module_index, (module_name, module_href) in enumerate(modules, 1):
+        print(f"    [{module_index}/{len(modules)}] Module: {module_name}")
+        
         challenges = get_challenges(dojo, module_href)
         if challenges:
+            print(f"      ✓ Found {len(challenges)} challenges: {', '.join(challenges[:3])}" + 
+                  ("..." if len(challenges) > 3 else ""))
             data.append({
                 "Dojo": dojo.replace("-", " ").title(),
                 "Module": module_name,
                 "Challenges": ", ".join(challenges)
             })
+        else:
+            print(f"      ⚠️  No challenges found in {module_name}")
+
+print(f"\n" + "=" * 50)
+print(f"Scraping complete! Collected data from {len(data)} modules total.")
 
 # Convert to DataFrame and sort
+print("\nProcessing data...")
 df = pd.DataFrame(data)
 df = df.sort_values(by=["Dojo", "Module", "Challenges"])
 
 # Output as Markdown
+print("Generating markdown table...")
 markdown_table = df.to_markdown(index=False)
 
 # Save to file
+print("Saving to file...")
 with open("pwn_college_structure.md", "w") as f:
     f.write(markdown_table)
 
-print("Scraping complete. Results saved to 'pwn_college_structure.md'")
+print(f"\n🎉 Scraping complete! Results saved to 'pwn_college_structure.md'")
+print(f"📊 Total entries: {len(df)} modules across {len(df['Dojo'].unique())} dojos")
